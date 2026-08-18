@@ -945,6 +945,30 @@
     else limparNotificacaoTimer();
   }
 
+  // O cronômetro guardado aponta para um tópico que não existe mais em NENHUM
+  // plano salvo? Então ele ficou órfão (o plano dele foi excluído/trocado) e o
+  // tempo não tem onde ser registrado: o app mostrava uma sessão pausada eterna,
+  // com o id cru do tópico ("ADM-U1"), sem forma de encerrar.
+  function timerOrfao(e) {
+    if (!e || !e.topicoId || e.topicoId === ID_SIM_TIMER) return false;
+    return !D.topicoExisteEmAlgumPlano(state, e.topicoId);
+  }
+
+  // Descarta o cronômetro órfão. Só age com o estado local já carregado
+  // (`temDados`): num aparelho que ainda espera a nuvem, os planos podem chegar
+  // depois — nesse caso o timer fica de pé e é reavaliado após o sync.
+  function sanearTimerOrfao(opcoes) {
+    opcoes = opcoes || {};
+    if (!window.Timer) return false;
+    const e = window.Timer.estado();
+    if (!timerOrfao(e)) return false;
+    if (!opcoes.forcar && !window.Store.temDados(state)) return false;
+    window.Timer.descartar();
+    atualizarTituloTimer(null);
+    if (!opcoes.silencioso) toast('O cronômetro pausado era de um plano excluído — descartado.', 'sucesso');
+    return true;
+  }
+
   function confete() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const cores = ['#2148C0', '#1E7D46', '#C03B2B', '#9A6B00'];
@@ -2799,6 +2823,11 @@
     } else if (ativo.topicoId === ID_SIM_TIMER) {
       selecao = '<div class="timer-disciplina-topo"><h2>📝 Simulado</h2>' +
         '<p class="timer-topico-ativo">cronometrando o simulado — encerre para preencher o gabarito</p></div>';
+    } else if (timerOrfao(ativo)) {
+      // Só chega aqui enquanto o estado local ainda não permite sanear (ex.: à
+      // espera da nuvem). Deixa claro o que houve em vez de mostrar o id cru.
+      selecao = '<div class="timer-disciplina-topo"><h2>Estudo sem plano</h2>' +
+        '<p class="timer-topico-ativo">o plano deste cronômetro foi excluído — encerre ou descarte o tempo</p></div>';
     } else {
       const discAtiva = D.disciplinaDoTopico(state, ativo.topicoId);
       selecao = '<div class="timer-disciplina-topo"><h2>' + esc(discAtiva ? nomeDiscCurto(discAtiva.nome) : 'Estudo') + '</h2>' +
@@ -2986,6 +3015,13 @@
           abrirNovoSimulado({ duracaoMin: Math.max(1, minutosEstudoTimer(fim)) });
           return;
         }
+        // Tópico de um plano excluído: registrar aqui jogaria o tempo na
+        // primeira disciplina do plano atual, que não tem nada a ver.
+        if (timerOrfao(fim)) {
+          toast('O plano deste cronômetro foi excluído — o tempo não pôde ser registrado.', 'erro');
+          render();
+          return;
+        }
         // Timer iniciado a partir de uma revisão: encerra caindo no modal de
         // concluir a revisão, com o tempo cronometrado já preenchido.
         if (fim.revisaoId && state.revisoes.some(function (r) { return r.id === fim.revisaoId && !r.dataConcluida; })) {
@@ -3054,7 +3090,8 @@
         corpo.innerHTML =
           '<div class="timer-mini-clock"><div class="timer-display" id="tr-display">00:00</div>' +
           '<div class="timer-modo-info" id="tr-info"></div></div>' +
-          '<p class="tr-topico">' + (e.topicoId === ID_SIM_TIMER ? '📝 Simulado em andamento' : esc(nomeTopicoCompleto(e.topicoId))) + '</p>' +
+          '<p class="tr-topico">' + (e.topicoId === ID_SIM_TIMER ? '📝 Simulado em andamento'
+            : timerOrfao(e) ? 'Estudo de um plano excluído' : esc(nomeTopicoCompleto(e.topicoId))) + '</p>' +
           '<div class="modal-acoes tr-acoes">' +
           (e.rodando ? '<button class="botao-quieto" id="tr-pausar">Pausar</button>' : '<button class="botao-quieto" id="tr-retomar">Retomar</button>') +
           '<button id="tr-encerrar">Encerrar</button>' +
@@ -3069,6 +3106,12 @@
           const fim = window.Timer.finalizar();
           atualizarTituloTimer(null);
           if (fim.topicoId === ID_SIM_TIMER) { render(); abrirNovoSimulado({ duracaoMin: Math.max(1, minutosEstudoTimer(fim)) }); return; }
+          if (timerOrfao(fim)) {
+            toast('O plano deste cronômetro foi excluído — o tempo não pôde ser registrado.', 'erro');
+            fecharModal();
+            render();
+            return;
+          }
           abrirRegistro({ topicoId: fim.topicoId, duracaoMin: Math.max(1, minutosEstudoTimer(fim)), tipo: 'teoria', blocoId: fim.blocoId || null, aoSalvar: function () { render(); } });
           render();
         });
@@ -5629,6 +5672,7 @@
     limparDadosVinculados(troca.origemId);
     window.Store.removerPlano(state, troca.origemId);
     window.Store.ativarPlano(state, entradaNova.id);
+    sanearTimerOrfao({ forcar: true });
     if (!state.config.planosExcluidos || typeof state.config.planosExcluidos !== 'object') state.config.planosExcluidos = {};
     state.config.planosExcluidos[troca.origemId] = new Date().toISOString();
     if (state.config) delete state.config.apagadoEm;
@@ -8576,8 +8620,12 @@
           const resultado = D.excluirDisciplina(state, id);
           if (!resultado.ok) { toast('Não foi possível excluir a disciplina.', 'erro'); return; }
           window.Store.marcarRemovido(state, resultado.idsRemovidos);
+          // Cronômetro rodando num assunto da disciplina que saiu: mesmo caso do
+          // plano excluído — o tempo não tem mais onde ser registrado.
+          const timerDescartado = sanearTimerOrfao({ forcar: true, silencioso: true });
           salvar(); fecharModal(); render();
-          toast(resultado.disciplinaNome + ' excluída do plano.', 'sucesso');
+          toast(resultado.disciplinaNome + ' excluída do plano.' +
+            (timerDescartado ? ' Cronômetro em aberto descartado.' : ''), 'sucesso');
         });
       });
     });
@@ -9339,6 +9387,9 @@
     const calendar = limparHistorico ? await excluirEventosPlanoGoogleCalendar(planoId) : { removidos: 0, pendentes: 0 };
     if (limparHistorico) limparDadosVinculados(planoId);
     window.Store.removerPlano(state, planoId);
+    // Cronômetro em aberto do plano que acabou de sair: sem tópico/plano onde
+    // registrar o tempo, ele viraria uma sessão pausada fantasma.
+    const timerDescartado = sanearTimerOrfao({ forcar: true, silencioso: true });
     // Lápide da exclusão: impede que um aparelho com cópia local antiga
     // ressuscite este plano na próxima mescla (ver Store.mesclarEstados).
     if (!state.config.planosExcluidos || typeof state.config.planosExcluidos !== 'object') state.config.planosExcluidos = {};
@@ -9355,6 +9406,7 @@
     pulaRecalcSemanal = false;
     toast('Plano excluído' + (limparHistorico ? ' com os dados vinculados' : '') +
       (calendar.removidos ? ' e Calendar limpo' : '') +
+      (timerDescartado ? ' · cronômetro em aberto descartado' : '') +
       (calendar.pendentes ? ' · Calendar pendente de autorizacao' : ''), calendar.pendentes ? 'erro' : 'sucesso');
     return true;
   }
@@ -10180,6 +10232,7 @@
       if (!state.planos.some(function (p) { return p.id === opcoes.novoPlanoId; })) return;
       limparDadosVinculados(opcoes.novoPlanoId);
       window.Store.removerPlano(state, opcoes.novoPlanoId);
+      sanearTimerOrfao({ forcar: true });
       if (opcoes.planoAnteriorId && state.planos.some(function (p) { return p.id === opcoes.planoAnteriorId; })) {
         window.Store.ativarPlano(state, opcoes.planoAnteriorId);
       }
@@ -13011,7 +13064,10 @@
   });
 
   const recuperado = window.Timer.recuperar();
-  if (recuperado) {
+  // Antes de anunciar a recuperação: se o timer é de um plano que já não existe,
+  // ele é descartado aqui mesmo (o toast do saneamento explica o que houve).
+  const recuperadoOrfao = recuperado && sanearTimerOrfao();
+  if (recuperado && !recuperadoOrfao) {
     toast('Timer recuperado em ' + window.Timer.formatar(recuperado.decorridoMs) + ' (pausado) — toque em retomar para continuar.', 'sucesso');
     if (!location.hash || location.hash === '#hoje') location.hash = '#timer';
   }
@@ -13051,6 +13107,9 @@
       // marca como alterado para ressincronizar o resultado.
       const curou = migrarRevisoesEmPilha() > 0;
       window.Store.salvar(state, { marcarAlterado: curou });
+      // O plano pode ter sido excluído em OUTRO aparelho: revalida o cronômetro
+      // com o estado recém-chegado da nuvem.
+      sanearTimerOrfao({ silencioso: silencioso });
       render();
       if (!silencioso) toast('Dados sincronizados', 'sucesso');
     }

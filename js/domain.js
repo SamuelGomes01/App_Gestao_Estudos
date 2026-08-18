@@ -64,6 +64,17 @@
     return state.disciplinas.find((d) => d.topicos.some((t) => t.id === topicoId)) || null;
   }
 
+  // O tópico ainda existe em ALGUM plano salvo (não só no plano ativo)?
+  // Usado para detectar referências órfãs — ex.: o cronômetro pausado de um
+  // plano que foi excluído — sem confundir com o timer de um plano inativo.
+  function topicoExisteEmAlgumPlano(state, topicoId) {
+    if (!state || !topicoId) return false;
+    const listas = [state.disciplinas || []].concat(
+      (state.planos || []).map((entrada) => (entrada && entrada.disciplinas) || []));
+    return listas.some((ds) => ds.some((d) =>
+      ((d && d.topicos) || []).some((t) => t && t.id === topicoId)));
+  }
+
   function disciplinaPorId(state, id) {
     return state.disciplinas.find((d) => d.id === id) || null;
   }
@@ -2765,7 +2776,7 @@
   window.Dominio = {
     CURVA_REVISAO_PADRAO_DIAS, intervalosRevisaoConfig, validarEsquemaRevisao,
     hojeISO, addDias, diffDias, formatarDataBR, formatarMesBR, segundaDaSemana, formatarMin,
-    topicoPorId, disciplinaDoTopico, disciplinaPorId, excluirDisciplina, renomearTopico, doPlanoAtivo, sessoesDoPlano,
+    topicoPorId, topicoExisteEmAlgumPlano, disciplinaDoTopico, disciplinaPorId, excluirDisciplina, renomearTopico, doPlanoAtivo, sessoesDoPlano,
     agendarRevisoes, desempenhoTopico, desempenhoDisciplina, desempenhoGeral,
     revisaoReabreTopico, sugereRevisarTeoria, fatorEspacamentoRevisao,
     reagendarRevisoesAdaptativo, moduladorIncidencia, estadoAdaptacaoRevisao, prazoProva, prontidaoProva, retaFinalInfo, streak, semaforo,
