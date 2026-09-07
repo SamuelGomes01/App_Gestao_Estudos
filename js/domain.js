@@ -859,6 +859,55 @@
     return null;
   }
 
+  // Família cognitiva da disciplina. Usada pelos DOIS modos de planejamento para
+  // não abrir o plano com uma família só. `\bdir\b` pega a abreviação usada em
+  // quase todo edital ("Noções Dir. Processual Penal"), que sem isso caía em
+  // 'geral' e fazia uma matéria de Direito passar por "de outra área".
+  function grupoCognitivoDisciplina(d) {
+    const nome = ((d && d.nome) + ' ' + (d && d.id)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (/portugues|lingua|redacao|texto|gramatica/.test(nome)) return 'linguagem';
+    if (/raciocinio|logico|matematica|estatistica|financeira|exatas/.test(nome)) return 'logica';
+    if (/direito|\bdir\b|legislacao|constitucional|administrativo|civil|penal|tributario|previdenciario|processual/.test(nome)) return 'direito';
+    if (/informatica|tecnologia|dados|sistemas/.test(nome)) return 'tecnologia';
+    return 'geral';
+  }
+
+  // Nº de disciplinas que abrem o plano; o resto entra escalonado.
+  const LARGADA_PLANO = 3;
+
+  // Regra de VARIEDADE NA LARGADA, compartilhada pelo cronograma e pelo ciclo.
+  // Recebe a ordem já definida por importância e devolve a disciplina que merece
+  // uma vaga EXTRA na abertura, para o plano não começar com uma família só —
+  // num edital de carreira jurídica isso seria 3 Direitos, empurrando Português
+  // para o meio do plano. Devolve null quando não há nada a corrigir.
+  //   ordem: lista na ordem de entrada; cada item precisa expor `grupo`.
+  //   porImportancia: a mesma lista ordenada por score (melhor primeiro).
+  //   dadosDe: extrai { peso, volume } do item, para escolher a matéria-BASE
+  //            entre as de linguagem (Língua Portuguesa antes de Redação Oficial).
+  function promoverVariedadeLargada(ordem, porImportancia, dadosDe) {
+    if (!Array.isArray(ordem) || ordem.length <= LARGADA_PLANO) return null;
+    const largada = ordem.slice(0, LARGADA_PLANO);
+    function fora(d) { return largada.indexOf(d) < 0; }
+    // 1) Língua/interpretação é a matéria mais universal dos concursos e a que
+    //    mais depende de tempo para maturar: se o edital tem uma e ela ficou de
+    //    fora, é ela que entra. Não adianta a largada ser "variada" por uma
+    //    matéria de decoreba se o aluno só vê Português no terceiro mês.
+    if (!largada.some(function (d) { return d.grupo === 'linguagem'; })) {
+      const linguas = porImportancia.filter(function (d) { return fora(d) && d.grupo === 'linguagem'; });
+      if (linguas.length) {
+        return linguas.slice().sort(function (a, b) {
+          const da = dadosDe(a), db = dadosDe(b);
+          return (db.peso || 1) - (da.peso || 1) || (db.volume || 0) - (da.volume || 0);
+        })[0];
+      }
+    }
+    // 2) Edital sem matéria de linguagem: basta quebrar a monotonia quando a
+    //    largada inteira é de uma família só.
+    const grupo = largada[0].grupo;
+    if (largada.some(function (d) { return d.grupo !== grupo; })) return null;
+    return porImportancia.find(function (d) { return fora(d) && d.grupo !== grupo; }) || null;
+  }
+
   // Gera blocos ponderados por peso da disciplina × incidência dos tópicos
   // pendentes, com leve reforço para matérias com desempenho baixo. Exclui ORF.
   function sugerirCiclo(state, opcoes) {
@@ -911,7 +960,7 @@
       const reforco = (pct !== null && pct < 70) ? 1 + (70 - pct) / 140 : 1;
       // plano combinado: ênfase manual + foco que migra quando uma prova passa
       const enf = fatorDisciplinaCombinada(state.plano, d, hojeCiclo);
-      return { disc: d, peso: base * reforco * enf };
+      return { disc: d, peso: base * reforco * enf, grupo: grupoCognitivoDisciplina(d) };
     });
     const somaPesos = pesos.reduce(function (s, p) { return s + p.peso; }, 0) || 1;
 
@@ -921,12 +970,19 @@
     // disciplinas não vale escalonar.
     const ordenados = pesos.slice().sort(function (a, b) { return b.peso - a.peso; });
     const total = ordenados.length;
+    // Mesma regra de variedade do cronograma: a volta 1 não abre com uma família
+    // de matéria só. Sem isso o ciclo de um edital jurídico começava com 3
+    // Direitos e o aluno só via Português depois de várias voltas.
+    const promovida = promoverVariedadeLargada(ordenados, ordenados, function (p) {
+      return { peso: (p.disc && p.disc.peso) || 1, volume: ((p.disc && p.disc.topicos) || []).length };
+    });
     return ordenados.map(function (p, rank) {
       const bruto = (p.peso / somaPesos) * minutosSemana;
       // múltiplos de 30, entre 30min e 2h (blocos digeríveis; o resto vira mais voltas)
       const metaMin = Math.min(maxBloco, Math.max(minBloco, Math.round(bruto / 5) * 5));
       const topico = topicoSugerido(p.disc);
-      const voltaInicio = total <= 4 ? 1 : (rank < 3 ? 1 : 1 + Math.ceil((rank - 2) / 2));
+      const voltaInicio = (total <= 4 || rank < LARGADA_PLANO || p === promovida)
+        ? 1 : 1 + Math.ceil((rank - 2) / 2);
       return { id: novoIdBloco(), disciplinaId: p.disc.id, topicoId: topico ? topico.id : null, metaMin: metaMin, feitoMin: 0, voltaInicio: voltaInicio };
     });
   }
@@ -2782,6 +2838,7 @@
     reagendarRevisoesAdaptativo, moduladorIncidencia, estadoAdaptacaoRevisao, prazoProva, prontidaoProva, retaFinalInfo, streak, semaforo,
     cronogramaAtivo, semanaCorrente, blocoFeito, filaHoje, urgenciaTopico, sugerirReestudo,
     cicloAtivo, blocoCicloAtual, blocosAtivosCiclo, sugerirCiclo, avancarCiclo,
+    grupoCognitivoDisciplina, promoverVariedadeLargada, LARGADA_PLANO,
     alertaCobertura, adicionarTopicosAoCiclo,
     diaSemanaISO, aplicarRegrasAgenda, regraAgendaAtiva,
     STATUS_DISCIPLINA, statusDisciplinaPlanejamento, disciplinaAtivaPlanejamento,
