@@ -31,7 +31,10 @@ test('arquivos críticos de sincronização são publicados na mesma versão da 
     return match[1];
   });
   assert.equal(new Set(versoes).size, 1, 'assets críticos não podem ficar em gerações diferentes');
-  assert.match(serviceWorker, /const CACHE = 'estudos-v\d+-timer-orfao'/);
+  // O slug acompanha a feature de cada bump; o que o teste garante é o FORMATO
+  // (estudos-v<n>-<slug>), não o nome de uma entrega específica — senão todo bump de
+  // cache quebra este teste e obriga a editá-lo junto.
+  assert.match(serviceWorker, /const CACHE = 'estudos-v\d+-[a-z0-9-]+'/);
 });
 
 test('service worker mantém disponíveis offline o plano de exemplo e os ícones do manifesto', () => {
