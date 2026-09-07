@@ -11911,6 +11911,19 @@
     return saida;
   }
 
+  // Reordena os blocos GERADOS de um dia para não deixar dois da mesma matéria
+  // emendados (o algoritmo em si vive em domain.js, onde é testável).
+  // Só escreve `ordem`: nada de duração, tópico ou quantidade de blocos.
+  function intercalarBlocosDoDia(slot) {
+    const doDia = doAtivo(state.agenda).filter(function (b) {
+      return b && b.data === slot.data && b.gerado && typeof b.ordem === 'number';
+    }).sort(compararAgenda);
+    if (doDia.length < 3) return; // com até 2 blocos a alocação já resolveu
+    const base = doDia[0].ordem;  // preserva o offset deixado pelos blocos manuais
+    D.ordenarSemRepetirVizinho(doDia, function (b) { return b.disciplinaId; })
+      .forEach(function (b, i) { b.ordem = base + i; });
+  }
+
   // núcleo da geração: preenche a agenda de UMA semana a partir do cronograma
   // (sem toast/salvar/render — quem chama decide). Retorna null se não houver semana.
   function gerarBlocosSemanaAgenda(refInicio, opts) {
@@ -12087,6 +12100,14 @@
       });
       D.aplicarRegrasAgenda(daSemana, regras, ini, state.planoAtivoId);
     }
+    // Passe final de intercalação, POR DIA. A fila da semana já vem alternada, mas
+    // três coisas podem juntar dois blocos da mesma matéria num dia: o corte da
+    // fila em dias, o preenchimento das sobras e as regras de troca acima. E na
+    // reta final, quando quase só resta uma matéria pendente, as poucas de outra
+    // disciplina precisam ser ESPALHADAS pelo dia em vez de ficarem no fim dele —
+    // era o caso de "PCI, PCI, PCI, PCI, RLM". Só mexe na ORDEM de exibição: os
+    // blocos, suas durações e a carga do dia ficam exatamente como estavam.
+    slots.forEach(intercalarBlocosDoDia);
     return { semana: dist.semana, inicio: ini, pendentes: pendentes, excedente: excedente };
   }
 
