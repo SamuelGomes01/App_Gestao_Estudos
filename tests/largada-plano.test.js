@@ -93,6 +93,42 @@ test('ciclo do TRF3 não abre a volta 1 só com Direito', () => {
   assert.ok(grupos.size > 1, 'a volta 1 ficou com uma família de matéria só: ' + largada.join(','));
 });
 
+function adjacencias(lista) {
+  let n = 0;
+  for (let i = 1; i < lista.length; i++) if (lista[i] === lista[i - 1]) n++;
+  return n;
+}
+
+test('ordenarSemRepetirVizinho: separa vizinhos iguais quando é possível', () => {
+  const entrada = ['A', 'A', 'A', 'B', 'B', 'C'];
+  const saida = D.ordenarSemRepetirVizinho(entrada, (x) => x);
+  assert.equal(adjacencias(saida), 0, 'saiu com vizinhos iguais: ' + saida.join(''));
+  assert.deepEqual(saida.slice().sort(), entrada.slice().sort(), 'não pode perder nem inventar item');
+});
+
+test('ordenarSemRepetirVizinho: espalha a chave rara em vez de deixá-la no fim', () => {
+  // O caso da reta final do plano: quase tudo de uma matéria e um bloco de outra.
+  const saida = D.ordenarSemRepetirVizinho(['A', 'A', 'A', 'A', 'B'], (x) => x);
+  assert.equal(saida[saida.length - 1], 'A', 'o item raro não deveria terminar no fim');
+  assert.equal(adjacencias(saida), 2, 'com 4 A e 1 B o mínimo é 2 emendas, veio: ' + saida.join(''));
+});
+
+test('ordenarSemRepetirVizinho: uma chave só devolve tudo, sem travar', () => {
+  const saida = D.ordenarSemRepetirVizinho(['A', 'A', 'A'], (x) => x);
+  assert.deepEqual(saida, ['A', 'A', 'A']);
+});
+
+test('ordenarSemRepetirVizinho: lista vazia e de um item', () => {
+  assert.deepEqual(D.ordenarSemRepetirVizinho([], (x) => x), []);
+  assert.deepEqual(D.ordenarSemRepetirVizinho(['A'], (x) => x), ['A']);
+});
+
+test('ordenarSemRepetirVizinho: não altera a lista original', () => {
+  const entrada = ['A', 'A', 'B'];
+  D.ordenarSemRepetirVizinho(entrada, (x) => x);
+  assert.deepEqual(entrada, ['A', 'A', 'B']);
+});
+
 test('ciclo: toda disciplina do edital entra em alguma volta', () => {
   const state = stateDoEdital('edital-trf3-tjaa-2024.json');
   const blocos = D.sugerirCiclo(state, { minutosSemana: 960, minBloco: 30, maxBloco: 60 });

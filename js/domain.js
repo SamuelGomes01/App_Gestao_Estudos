@@ -859,6 +859,37 @@
     return null;
   }
 
+  // Reordena uma lista para evitar vizinhos com a mesma chave (a disciplina, no
+  // caso dos blocos de um dia). Guloso clássico: a cada passo pega a chave com
+  // mais itens ainda por posicionar, entre as diferentes da anterior. Isso
+  // minimiza as adjacências e, de quebra, ESPALHA as chaves raras em vez de
+  // amontoá-las no fim. Quando uma chave sozinha passa da metade dos itens sobra
+  // adjacência inevitável — aí ela se concentra no menor número possível de
+  // emendas. Devolve uma lista nova; não altera a original.
+  function ordenarSemRepetirVizinho(itens, chaveDe) {
+    const restantes = (itens || []).slice();
+    const saida = [];
+    let ultima = null;
+    while (restantes.length) {
+      const contagem = {};
+      restantes.forEach(function (x) {
+        const k = chaveDe(x);
+        contagem[k] = (contagem[k] || 0) + 1;
+      });
+      let idx = -1, melhor = -1;
+      restantes.forEach(function (x, i) {
+        const k = chaveDe(x);
+        if (k === ultima) return;
+        if (contagem[k] > melhor) { melhor = contagem[k]; idx = i; }
+      });
+      if (idx < 0) idx = 0; // só resta a mesma chave: a emenda é inevitável
+      const escolhido = restantes.splice(idx, 1)[0];
+      saida.push(escolhido);
+      ultima = chaveDe(escolhido);
+    }
+    return saida;
+  }
+
   // Família cognitiva da disciplina. Usada pelos DOIS modos de planejamento para
   // não abrir o plano com uma família só. `\bdir\b` pega a abreviação usada em
   // quase todo edital ("Noções Dir. Processual Penal"), que sem isso caía em
@@ -2838,7 +2869,7 @@
     reagendarRevisoesAdaptativo, moduladorIncidencia, estadoAdaptacaoRevisao, prazoProva, prontidaoProva, retaFinalInfo, streak, semaforo,
     cronogramaAtivo, semanaCorrente, blocoFeito, filaHoje, urgenciaTopico, sugerirReestudo,
     cicloAtivo, blocoCicloAtual, blocosAtivosCiclo, sugerirCiclo, avancarCiclo,
-    grupoCognitivoDisciplina, promoverVariedadeLargada, LARGADA_PLANO,
+    grupoCognitivoDisciplina, promoverVariedadeLargada, LARGADA_PLANO, ordenarSemRepetirVizinho,
     alertaCobertura, adicionarTopicosAoCiclo,
     diaSemanaISO, aplicarRegrasAgenda, regraAgendaAtiva,
     STATUS_DISCIPLINA, statusDisciplinaPlanejamento, disciplinaAtivaPlanejamento,
