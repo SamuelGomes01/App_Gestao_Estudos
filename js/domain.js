@@ -2296,20 +2296,42 @@
 
   // ---------- Modo reta final ----------
   // Nas últimas semanas antes da prova, o foco deixa de ser "ver matéria nova" e
-  // passa a ser consolidar: questões, simulados e revisão do que mais cai. Liga
-  // sozinho quando a prova está a <= 6 semanas (porData) e pode ser ligado
-  // manualmente pelo aluno (manual) — útil quando não há data marcada.
+  // passa a ser consolidar: questões, simulados e revisão do que mais cai.
+  //
+  // O modo NUNCA liga sozinho. Ele muda o que o app recomenda — e para quem começou
+  // há pouco, e ainda tem metade do edital para ver, "pare de estudar matéria nova"
+  // é o conselho errado. A proximidade da prova é motivo para PERGUNTAR, com o
+  // contexto na mesa, não para decidir pelo aluno. `propor` marca esse momento; a
+  // decisão dele fica em plano.modoRetaFinal (ligado) e plano.retaFinalRecusada.
+  //
+  // Recusar não cala para sempre: quem disse "agora não" faltando 6 semanas é
+  // perguntado de novo na véspera, quando o quadro é outro.
   const SEMANAS_RETA_FINAL = 6;
+  const SEMANAS_RETA_FINAL_REPERGUNTA = 2;
   function retaFinalInfo(state, hoje) {
-    const manual = !!(state && state.plano && state.plano.modoRetaFinal);
+    const ligado = !!(state && state.plano && state.plano.modoRetaFinal);
+    const recusa = (state && state.plano && state.plano.retaFinalRecusada) || null;
     const prazo = prazoProva(state);
     hoje = hoje || hojeISO();
-    if (!prazo) return { ativa: manual, manual: manual, porData: false, semanas: null, dias: null, prazo: null };
+    const base = { ativa: ligado, manual: ligado, porData: false, propor: false, semanas: null, dias: null, prazo: null };
+    if (!prazo) return base;
     const dias = diffDias(hoje, prazo);
-    if (dias <= 0) return { ativa: manual, manual: manual, porData: false, passou: true, semanas: 0, dias: dias, prazo: prazo };
+    if (dias <= 0) {
+      return Object.assign({}, base, { passou: true, semanas: 0, dias: dias, prazo: prazo });
+    }
     const semanas = Math.ceil(dias / 7);
     const porData = semanas <= SEMANAS_RETA_FINAL;
-    return { ativa: manual || porData, manual: manual, porData: porData, passou: false, semanas: semanas, dias: dias, prazo: prazo };
+    // Uma recusa vale até a prova chegar bem mais perto do que estava quando ela
+    // foi dada; aí a pergunta se justifica de novo.
+    const recusaValendo = !!recusa && !(
+      semanas <= SEMANAS_RETA_FINAL_REPERGUNTA &&
+      (recusa.semanas == null || recusa.semanas > SEMANAS_RETA_FINAL_REPERGUNTA)
+    );
+    return {
+      ativa: ligado, manual: ligado, porData: porData, passou: false,
+      propor: porData && !ligado && !recusaValendo,
+      semanas: semanas, dias: dias, prazo: prazo
+    };
   }
 
   // ---------- RN12 — Cobertura vs. prova: tópicos que NÃO devem ser alcançados ----------

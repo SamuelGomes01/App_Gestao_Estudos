@@ -2614,6 +2614,7 @@
     if (!talvezConvidarAprofundamento()) talvezComemorarDia();
     setTimeout(function () {
       if (talvezAvisarProvaPassada()) return; // um modal de cada vez
+      if (talvezProporRetaFinal()) return;
       talvezAvisarNovasDisciplinas();
     }, 0);
     raiz.querySelectorAll('.prova-editar').forEach(function (b) { b.addEventListener('click', abrirEditarProva); });
@@ -8794,42 +8795,95 @@
   function modoRetaFinalControleHtml() {
     const rf = D.retaFinalInfo(state, D.hojeISO());
     if (rf.ativa) {
-      const motivo = rf.manual
-        ? 'ativado por você'
-        : 'ligado automaticamente — falta ' + (rf.semanas <= 1 ? 'menos de 1 semana' : 'cerca de ' + rf.semanas + ' semanas');
+      // O modo só liga por decisão do aluno, então é sempre ele quem desativa.
       return '<div class="modo-controle modo-controle-ativo">' +
-        '<span class="modo-controle-txt">🏁 <strong>Modo reta final ativo</strong> — ' + motivo + '.</span>' +
-        (rf.manual ? '<button type="button" class="botao-mini botao-quieto" id="pl-reta-desativar">Desativar</button>' : '') +
+        '<span class="modo-controle-txt">🏁 <strong>Modo reta final ativo</strong> — ativado por você.</span>' +
+        '<button type="button" class="botao-mini botao-quieto" id="pl-reta-desativar">Desativar</button>' +
         '</div>';
     }
+    // Prova já dentro da janela: o card diz isso, mas quem liga é o aluno.
+    const chamada = rf.porData && rf.semanas != null
+      ? 'A prova é em ' + (rf.semanas <= 1 ? 'menos de 1 semana' : 'cerca de ' + rf.semanas + ' semanas') +
+        '. O <strong>modo reta final</strong> troca teoria nova por questões, simulados e revisão do que mais cai.'
+      : 'Prova chegando? O <strong>modo reta final</strong> foca tudo em questões, simulados e revisão do que mais cai.';
     return '<div class="modo-controle">' +
-      '<span class="modo-controle-txt">🏁 Prova chegando? O <strong>modo reta final</strong> foca tudo em questões, simulados e revisão do que mais cai.</span>' +
+      '<span class="modo-controle-txt">🏁 ' + chamada + '</span>' +
       '<button type="button" class="botao-mini botao-secundario" id="pl-reta-ativar">Ativar modo reta final</button></div>';
   }
 
-  // Modal explicativo do modo reta final (com confirmação).
-  function abrirModoRetaFinal() {
+  // Modal explicativo do modo reta final (com confirmação). `proposta` = true
+  // quando é o app que puxou a conversa por causa da data da prova; aí o texto
+  // abre pelo motivo e mostra quanto do edital ainda falta, porque é esse número
+  // que decide se o modo ajuda ou atrapalha.
+  function abrirModoRetaFinal(proposta) {
     if (!state.plano) { toast('Crie ou ative um plano primeiro.', 'erro'); return; }
+    const rf = D.retaFinalInfo(state, D.hojeISO());
+    const prog = D.progressoEdital(state);
+    const faltaPct = Math.max(0, 100 - prog.pct);
+    // Contraindicação honesta: com muito edital por ver, cortar teoria nova é
+    // trocar "não terminei" por "não vi". Quem decide é o aluno, mas com o número
+    // na frente — e o botão neutro vira o padrão.
+    const cedoDemais = prog.total > 0 && prog.pct < 60;
+    const quando = rf.semanas != null && rf.semanas > 0
+      ? (rf.semanas <= 1 ? 'menos de 1 semana' : 'cerca de ' + rf.semanas + ' semanas')
+      : null;
+
+    const abertura = proposta && quando
+      ? '<p class="sub">Falta <strong>' + esc(quando) + '</strong> para a sua prova. Nessa altura muita gente muda o foco: em vez de ver matéria nova, passa a <strong>consolidar</strong> o que já viu. Só que essa é uma decisão sua — o app não muda o plano sem você mandar.</p>'
+      : '<p class="sub">Ative quando a prova está chegando. O foco deixa de ser ver matéria nova e passa a ser <strong>consolidar</strong>:</p>';
+
+    const diagnostico = prog.total > 0
+      ? '<div class="reta-diag' + (cedoDemais ? ' reta-diag-alerta' : '') + '">' +
+        '<strong>Onde você está:</strong> ' + prog.concluidos + ' de ' + prog.total +
+        ' tópicos com a teoria vista (' + prog.pct + '%).' +
+        (cedoDemais
+          ? ' Ainda falta <strong>' + faltaPct + '% do edital</strong>. Ligar agora significa deixar boa parte da matéria sem ver — costuma valer mais a pena seguir o plano e ativar quando estiver mais perto do fim.'
+          : ' Com essa base, consolidar tende a render mais do que abrir matéria nova.') +
+        '</div>'
+      : '';
+
     const m = abrirModal(
       '<h3>🏁 Modo reta final</h3>' +
-      '<p class="sub">Ative quando a prova está chegando. O foco deixa de ser ver matéria nova e passa a ser <strong>consolidar</strong>:</p>' +
+      abertura +
+      diagnostico +
+      '<p class="sub">O que muda:</p>' +
       '<ul class="modo-lista">' +
       '<li>📝 <strong>Mais questões e simulados</strong> — treinar do jeito da prova.</li>' +
       '<li>🔁 <strong>Revisão intensiva</strong> dos tópicos que mais caem e dos seus pontos fracos.</li>' +
       '<li>🎯 <strong>Menos teoria nova</strong>: a prioridade é fixar o que você já viu.</li>' +
       '</ul>' +
-      '<p class="sub">Um painel no Hoje passa a guiar esse foco. Se a prova já tem data marcada, o modo liga sozinho nas últimas 6 semanas — aqui você pode ligar antes. Quer continuar?</p>' +
+      '<p class="sub">Um painel no Hoje passa a guiar esse foco, e você pode desligar quando quiser.</p>' +
       '<div class="modal-acoes">' +
-      '<button type="button" class="botao-quieto" id="reta-cancelar">Agora não</button>' +
-      '<button type="button" id="reta-confirmar">Ativar modo reta final</button></div>'
+      '<button type="button" class="botao-quieto" id="reta-cancelar">' + (proposta ? 'Agora não' : 'Cancelar') + '</button>' +
+      '<button type="button"' + (cedoDemais ? ' class="botao-secundario"' : '') + ' id="reta-confirmar">Ativar modo reta final</button></div>'
     );
-    m.querySelector('#reta-cancelar').addEventListener('click', fecharModal);
+    m.querySelector('#reta-cancelar').addEventListener('click', function () {
+      // Só registra recusa quando a pergunta partiu do app: um "cancelar" no botão
+      // manual não deve calar a proposta que ainda vai vir.
+      if (proposta && state.plano) {
+        state.plano.retaFinalRecusada = { em: D.hojeISO(), semanas: rf.semanas };
+        salvar({ sincronizar: false });
+      }
+      fecharModal();
+    });
     m.querySelector('#reta-confirmar').addEventListener('click', function () {
       state.plano.modoRetaFinal = true;
+      delete state.plano.retaFinalRecusada;
       delete state.plano.modoAprofundamento; // modos opostos: um desliga o outro
       salvar(); fecharModal(); render();
       toast('Modo reta final ativado 🏁', 'sucesso');
     });
+  }
+
+  // A prova entrou na janela da reta final e o aluno ainda não decidiu: pergunta,
+  // uma vez, em vez de ligar sozinho.
+  function talvezProporRetaFinal() {
+    if (!state.plano) return false;
+    const raizModal = document.getElementById('modal-raiz');
+    if (raizModal && raizModal.children.length) return false; // não empilha modais
+    if (!D.retaFinalInfo(state, D.hojeISO()).propor) return false;
+    abrirModoRetaFinal(true);
+    return true;
   }
 
   // Card próprio para ritmo ativo + geração do plano (logo abaixo do plano atual)
@@ -11245,6 +11299,7 @@
     setTimeout(talvezAlertarCobertura, 0);
     setTimeout(function () {
       if (talvezAvisarProvaPassada()) return; // um modal de cada vez
+      if (talvezProporRetaFinal()) return;
       talvezAvisarNovasDisciplinas();
     }, 0);
     const btnEnf = raiz.querySelector('#enf-ajustar');

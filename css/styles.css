@@ -3124,6 +3124,16 @@ html[data-tema="escuro"] .mes-evento .mes-evento-hora { color: var(--tinta); }
 .modal-dialogo .modal-acoes { justify-content: center; margin-top: 1.3rem; }
 .modal-dialogo input[type="text"] { text-align: center; margin-top: 0.4rem; }
 
+/* Diagnóstico dentro do modal do modo reta final: onde o aluno está no edital */
+.reta-diag {
+  border: 1px solid var(--linha); border-radius: 10px;
+  padding: 0.7rem 0.85rem; margin: 0.9rem 0; font-size: 0.86rem; line-height: 1.5;
+}
+.reta-diag-alerta {
+  background: var(--alerta-suave); color: var(--alerta);
+  border-color: rgba(138, 101, 0, 0.22);
+}
+
 /* Comunicação do plano: largada (por que começa com N matérias) e estreias */
 .modal-largada { max-width: 480px; }
 .largada-chips {

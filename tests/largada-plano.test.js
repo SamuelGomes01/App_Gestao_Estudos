@@ -93,6 +93,59 @@ test('ciclo do TRF3 não abre a volta 1 só com Direito', () => {
   assert.ok(grupos.size > 1, 'a volta 1 ficou com uma família de matéria só: ' + largada.join(','));
 });
 
+// A data da prova vem de plano.radar.janela_prova (AAAA-MM) e prazoProva usa o
+// dia 1 desse mês. Com `hoje` fixo os casos ficam determinísticos.
+const PROVA_EM = '2026-10'; // prazo = 2026-10-01
+function stateComProva(extraPlano) {
+  return {
+    plano: Object.assign({ radar: { janela_prova: [PROVA_EM] } }, extraPlano || {}),
+    disciplinas: [], config: {}, sessoes: [], revisoes: [], simulados: [], agenda: [], flashcards: []
+  };
+}
+
+test('reta final: NÃO liga sozinha quando a prova entra na janela', () => {
+  const rf = D.retaFinalInfo(stateComProva(), '2026-09-15'); // 16 dias → 3 semanas
+  assert.equal(rf.semanas, 3);
+  assert.equal(rf.porData, true, 'a prova está dentro da janela de 6 semanas');
+  assert.equal(rf.ativa, false, 'o modo não pode ligar sem o aluno decidir');
+  assert.equal(rf.propor, true, 'mas deve propor');
+});
+
+test('reta final: ativa só com a decisão do aluno', () => {
+  const rf = D.retaFinalInfo(stateComProva({ modoRetaFinal: true }), '2026-09-15');
+  assert.equal(rf.ativa, true);
+  assert.equal(rf.propor, false, 'já ligado: não propõe de novo');
+});
+
+test('reta final: prova longe não propõe nada', () => {
+  const rf = D.retaFinalInfo(stateComProva(), '2026-05-15');
+  assert.equal(rf.porData, false);
+  assert.equal(rf.ativa, false);
+  assert.equal(rf.propor, false);
+});
+
+test('reta final: recusa recente silencia a proposta', () => {
+  const st = stateComProva({ retaFinalRecusada: { em: '2026-08-27', semanas: 5 } });
+  assert.equal(D.retaFinalInfo(st, '2026-08-27').propor, false); // 35 dias → 5 semanas
+});
+
+test('reta final: recusa antiga volta a perguntar na véspera', () => {
+  // Disse "agora não" faltando 5 semanas; com a prova a 10 dias o quadro é outro.
+  const st = stateComProva({ retaFinalRecusada: { em: '2026-08-27', semanas: 5 } });
+  assert.equal(D.retaFinalInfo(st, '2026-09-21').propor, true); // 10 dias → 2 semanas
+});
+
+test('reta final: recusa já na véspera não vira insistência', () => {
+  const st = stateComProva({ retaFinalRecusada: { em: '2026-09-21', semanas: 2 } });
+  assert.equal(D.retaFinalInfo(st, '2026-09-21').propor, false);
+});
+
+test('reta final: sem data de prova, só o modo manual conta', () => {
+  const base = { disciplinas: [], config: {}, sessoes: [], revisoes: [], simulados: [], agenda: [], flashcards: [] };
+  assert.equal(D.retaFinalInfo(Object.assign({ plano: {} }, base), D.hojeISO()).ativa, false);
+  assert.equal(D.retaFinalInfo(Object.assign({ plano: { modoRetaFinal: true } }, base), D.hojeISO()).ativa, true);
+});
+
 function adjacencias(lista) {
   let n = 0;
   for (let i = 1; i < lista.length; i++) if (lista[i] === lista[i - 1]) n++;
