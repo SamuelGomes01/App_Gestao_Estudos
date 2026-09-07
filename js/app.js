@@ -9588,57 +9588,17 @@
     return true;
   }
 
-  // `\bdir\b` pega a abrevia\u00e7\u00e3o usada em quase todo edital ("No\u00e7\u00f5es Dir. Processual
-  // Penal"), que sem isso ca\u00eda em 'geral' e fazia a mat\u00e9ria passar por "de outra
-  // \u00e1rea" na regra de variedade da largada.
-  function grupoCognitivoDisciplina(d) {
-    const nome = (d.nome + ' ' + d.id).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (/portugues|lingua|redacao|texto|gramatica/.test(nome)) return 'linguagem';
-    if (/raciocinio|logico|matematica|estatistica|financeira|exatas/.test(nome)) return 'logica';
-    if (/direito|\bdir\b|legislacao|constitucional|administrativo|civil|penal|tributario|previdenciario|processual/.test(nome)) return 'direito';
-    if (/informatica|tecnologia|dados|sistemas/.test(nome)) return 'tecnologia';
-    return 'geral';
-  }
+  // Classificação de grupo e regra de variedade vivem em domain.js: os DOIS modos de
+  // planejamento (cronograma e ciclo) precisam usar as mesmas, senão divergem — foi
+  // exatamente o que aconteceu quando só o cronograma ganhou a regra e o ciclo
+  // continuou abrindo um edital jurídico com 3 Direitos.
+  const grupoCognitivoDisciplina = D.grupoCognitivoDisciplina;
+  const LARGADA_SEMANA1 = D.LARGADA_PLANO;
 
   const ROTULO_GRUPO = {
-    linguagem: 'linguagem', logica: 'l\u00f3gica e exatas', direito: 'Direito',
+    linguagem: 'linguagem', logica: 'lógica e exatas', direito: 'Direito',
     tecnologia: 'tecnologia', geral: 'conhecimentos gerais'
   };
-
-  // N\u00ba de disciplinas que abrem o plano na semana 1; o resto entra em rampa.
-  const LARGADA_SEMANA1 = 3;
-
-  // Devolve a disciplina que merece uma vaga EXTRA na largada, para o plano n\u00e3o abrir
-  // com uma fam\u00edlia de mat\u00e9ria s\u00f3. Sem isso um edital de carreira jur\u00eddica come\u00e7a com
-  // 3 Direitos e empurra Portugu\u00eas para o meio do plano \u2014 o aluno passa meses com a
-  // sensa\u00e7\u00e3o de "s\u00f3 estudo Direito" e as transversais, que maturam devagar, ficam
-  // para o fim. Devolve null quando n\u00e3o h\u00e1 nada a corrigir ou promover.
-  function promoverVariedadeLargada(ordemInicio, docsPorScore) {
-    if (ordemInicio.length <= LARGADA_SEMANA1) return null;
-    const largada = ordemInicio.slice(0, LARGADA_SEMANA1);
-    function fora(d) { return largada.indexOf(d) < 0; }
-    // 1) L\u00edngua/interpreta\u00e7\u00e3o \u00e9 a mat\u00e9ria mais universal dos concursos e a que mais
-    //    depende de tempo para maturar. Se o edital tem uma e ela ficou de fora da
-    //    largada, \u00e9 ela que entra \u2014 n\u00e3o adianta a largada ser "variada" por uma
-    //    mat\u00e9ria de decoreba se o aluno s\u00f3 vai ver Portugu\u00eas no terceiro m\u00eas.
-    if (!largada.some(function (d) { return d.grupo === 'linguagem'; })) {
-      // Entre as de linguagem entra a matéria-BASE, não a complementar: o score puro
-      // escolheria "Redação Oficial" (2 tópicos) na frente de "Língua Portuguesa" (9),
-      // porque a prioridade entra no score como MÉDIA e favorece disciplina pequena.
-      const linguas = docsPorScore.filter(function (d) { return fora(d) && d.grupo === 'linguagem'; });
-      if (linguas.length) {
-        return linguas.slice().sort(function (a, b) {
-          return (b.disciplina.peso || 1) - (a.disciplina.peso || 1) ||
-            b.topicos.length - a.topicos.length || b.score - a.score;
-        })[0];
-      }
-    }
-    // 2) Edital sem mat\u00e9ria de linguagem: basta quebrar a monotonia quando a largada
-    //    inteira \u00e9 de uma fam\u00edlia s\u00f3.
-    const grupo = largada[0].grupo;
-    if (largada.some(function (d) { return d.grupo !== grupo; })) return null;
-    return docsPorScore.find(function (d) { return fora(d) && d.grupo !== grupo; }) || null;
-  }
 
   // Recebe os docs já ordenados por importância (score) e devolve a ORDEM DE INÍCIO
   // com as dificuldades espalhadas: rodízio difícil → normal → fácil. Dentro de cada
@@ -9918,7 +9878,9 @@
     // cognitivo quando as 3 primeiras são todas da mesma família (ver
     // promoverVariedadeLargada). Ninguém é rebaixado: o limite de frentes por semana
     // continua valendo e alternarGrupos faz o rodízio entre as ativas.
-    const promovida = promoverVariedadeLargada(ordemInicio, docs);
+    const promovida = D.promoverVariedadeLargada(ordemInicio, docs, function (d) {
+      return { peso: d.disciplina.peso, volume: d.topicos.length };
+    });
     ordemInicio.forEach(function (d, idx) {
       d.inicio = (idx < LARGADA_SEMANA1 || d === promovida) ? 1
         : Math.min(semanas, 2 + Math.floor((idx - 2) * semanas / Math.max(1, docs.length)));
@@ -12011,10 +11973,22 @@
     // Blocos manuais e ajustes confirmados são fixos. Eles sobrevivem ao
     // recálculo e consomem primeiro a disponibilidade do dia, evitando que o
     // motor empilhe uma segunda carga por cima da decisão do usuário.
+    // A ordem de exibição dentro do dia (compararAgenda) desempata por id, e
+    // novoId() é `agd-<Date.now()>-<5 chars ALEATÓRIOS>`. Como todos os blocos de
+    // uma geração nascem no mesmo milissegundo, o desempate real era o sufixo
+    // aleatório: a sequência que ordenarTarefasIntercaladas monta alternando
+    // matéria e grupo chegava embaralhada na tela, e o aluno via dois blocos da
+    // mesma matéria (às vezes do mesmo tópico) emendados no mesmo dia. Numerar a
+    // ordem explicitamente faz o que foi planejado ser o que ele vê. Os blocos
+    // manuais do dia são numerados primeiro, preservando a posição relativa que
+    // já tinham, para o gerado não se intercalar no que o aluno pôs à mão.
     slots.forEach(function (s) {
-      const fixosMin = doAtivo(state.agenda).filter(function (b) {
+      const fixos = doAtivo(state.agenda).filter(function (b) {
         return b && b.data === s.data && !b.gerado;
-      }).reduce(function (n, b) { return n + (b.duracaoMin || 0); }, 0);
+      }).sort(compararAgenda);
+      fixos.forEach(function (b, i) { b.ordem = i; });
+      s.proximaOrdem = fixos.length;
+      const fixosMin = fixos.reduce(function (n, b) { return n + (b.duracaoMin || 0); }, 0);
       s.restante = Math.max(0, s.restante - fixosMin);
     });
     // As revisões do dia (repetição espaçada) consomem o tempo PRIMEIRO — são
@@ -12030,6 +12004,7 @@
         topicoId: bloco.topico || null,
         duracaoMin: dur,
         obs: bloco.tipo === 'teoria' ? 'teoria' : bloco.tipo,
+        ordem: slot.proximaOrdem++,
         // só a teoria de um tópico já vencido nasce "feita"; questões/revisão não
         feito: diaPassado || (bloco.tipo === 'teoria' && topico ? (topico.status === 'teoria_concluida' || topico.status === 'dominado') : false),
         gerado: true
@@ -12042,21 +12017,22 @@
 
     let slotIdx = 0;
     let pendentes = 0;
-    tarefas.forEach(function (tarefa) {
+    for (let i = 0; i < tarefas.length; i++) {
+      let tarefa = tarefas[i];
       while (slotIdx < slots.length && slots[slotIdx].restante < Math.min(minBloco, tarefa.duracaoMin)) slotIdx++;
-      if (slotIdx >= slots.length) { pendentes += tarefa.duracaoMin; return; }
+      if (slotIdx >= slots.length) { pendentes += tarefa.duracaoMin; continue; }
       let slot = slots[slotIdx];
       if (tarefa.duracaoMin > slot.restante && slot.restante >= minBloco) {
         pendentes += tarefa.duracaoMin - slot.restante;
         tarefa.duracaoMin = slot.restante;
       } else if (tarefa.duracaoMin > slot.restante) {
         slotIdx++;
-        if (slotIdx >= slots.length || tarefa.duracaoMin > slots[slotIdx].restante) { pendentes += tarefa.duracaoMin; return; }
+        if (slotIdx >= slots.length || tarefa.duracaoMin > slots[slotIdx].restante) { pendentes += tarefa.duracaoMin; continue; }
         slot = slots[slotIdx];
       }
       colocar(slot, tarefa.disciplina, tarefa.bloco, tarefa.duracaoMin);
       slot.restante -= tarefa.duracaoMin;
-    });
+    }
 
     // Sobras: o min/max de sessão é a regra inicial, mas o tempo que sobra em
     // cada dia é alocado entre as outras disciplinas (rodízio por peso) e o que
@@ -12072,17 +12048,31 @@
     });
     let poolIdx = 0;
     let excedente = 0;
+    // O rodízio das sobras precisa respeitar a MESMA regra de intercalação da
+    // distribuição principal (ordenarTarefasIntercaladas). Sem isso ele avançava o
+    // pool às cegas — e o pool guarda teoria e questões de cada disciplina lado a
+    // lado —, emendando dois blocos da mesma matéria, e do mesmo tópico, no mesmo
+    // dia. Só acontecia em rotina com folga sobrando no dia (ex.: 1h na quarta,
+    // 4h no sábado), que é justamente quando o preenchimento residual entra.
+    function proximoResidual(slot) {
+      const ultima = slot.ultimoBloco ? slot.ultimoBloco.disciplinaId : '';
+      for (let i = 0; i < poolResidual.length; i++) {
+        const cand = poolResidual[(poolIdx + i) % poolResidual.length];
+        if (cand.disciplina.id !== ultima) { poolIdx += i + 1; return cand; }
+      }
+      return poolResidual[poolIdx++ % poolResidual.length]; // só sobrou uma disciplina
+    }
     if (poolResidual.length) {
       slots.forEach(function (slot) {
         while (slot.restante >= minBloco) {
-          const u = poolResidual[poolIdx++ % poolResidual.length];
+          const u = proximoResidual(slot);
           const dur = Math.min(maxBloco, slot.restante);
           colocar(slot, u.disciplina, u.bloco, dur);
           slot.restante -= dur;
         }
         if (slot.restante > 0) {
           if (slot.ultimoBloco) { slot.ultimoBloco.duracaoMin += slot.restante; excedente += slot.restante; }
-          else { const u = poolResidual[poolIdx++ % poolResidual.length]; colocar(slot, u.disciplina, u.bloco, slot.restante); }
+          else { const u = proximoResidual(slot); colocar(slot, u.disciplina, u.bloco, slot.restante); }
           slot.restante = 0;
         }
       });

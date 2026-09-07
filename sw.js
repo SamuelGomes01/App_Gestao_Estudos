@@ -1,5 +1,5 @@
 /* Service worker — cache de estáticos (o app funciona 100% sem ele) */
-const CACHE = 'estudos-v165-largada-variada';
+const CACHE = 'estudos-v166-ordem-agenda';
 
 /* Toque na notificação: timer abre a tela do cronômetro; lembrete abre o app. */
 self.addEventListener('notificationclick', (e) => {
@@ -59,12 +59,12 @@ const ESTATICOS = [
   './calc/petrobras.html',
   './calc/judiciario-federal.html',
   './js/frases.js',
-  './css/styles.css?v=20260907-largada-variada',
-  './js/domain.js?v=20260907-largada-variada',
-  './js/store.js?v=20260907-largada-variada',
+  './css/styles.css?v=20260907b-ordem-agenda',
+  './js/domain.js?v=20260907b-ordem-agenda',
+  './js/store.js?v=20260907b-ordem-agenda',
   './js/sync.js?v=20260718h-seguranca-escala',
   './js/remote-state.js?v=20260718h-seguranca-escala',
-  './js/firebase-sync.js?v=20260907-largada-variada',
+  './js/firebase-sync.js?v=20260907b-ordem-agenda',
   './js/timer.js?v=20260718a-integridade',
   './js/charts.js?v=20260615v-green-performance',
   './data/catalogo-editais.js?v=20260721-inss2',
@@ -73,7 +73,7 @@ const ESTATICOS = [
   './assets/carreiras/capa-trf-tjaa.jpg?v=20260721-real1',
   './assets/carreiras/capa-trt-tjaa.jpg?v=20260721-real1',
   './data/exemplo-trf3.json?v=20260718g-integridade-sync',
-  './js/app.js?v=20260907-largada-variada',
+  './js/app.js?v=20260907b-ordem-agenda',
   './icons/icone.svg',
   './icons/icone-192.png',
   './icons/icone-512.png'
