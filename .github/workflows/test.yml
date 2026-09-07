@@ -30,9 +30,30 @@ jobs:
           done
       - name: Rodar testes
         run: npm test
-      - name: Validar Functions e dependências de produção
-        run: |
-          node -e "const f=require('./functions/index.js'); if(!f.gerarFlashcards || !f.lembreteEstudo) process.exit(1)"
-          npm audit --omit=dev --prefix functions
+      - name: Validar Functions
+        run: node -e "const f=require('./functions/index.js'); if(!f.gerarFlashcards || !f.lembreteEstudo) process.exit(1)"
       - name: Validar regras reais do Firestore
         run: npm run test:rules
+
+  # A auditoria vive FORA do job de testes de propósito. `npm audit` consulta o
+  # serviço de advisories em tempo real: o mesmo commit que passa hoje reprova
+  # amanhã porque uma advisory nova saiu, sem ninguém ter tocado no código. Junto
+  # dos testes, isso derrubava o job inteiro e escondia o resultado do que de fato
+  # depende do diff. Separada, ela reprova só em severidade ALTA — o que é risco
+  # real em produção —, enquanto moderate/low seguem visíveis no log sem travar
+  # PR nenhum.
+  auditoria:
+    name: auditoria de dependências
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Instalar dependências das Functions
+        run: npm ci --prefix functions
+      - name: Relatório completo (informativo)
+        run: npm audit --omit=dev --prefix functions || true
+      - name: Reprovar apenas em vulnerabilidade alta
+        run: npm audit --omit=dev --audit-level=high --prefix functions
