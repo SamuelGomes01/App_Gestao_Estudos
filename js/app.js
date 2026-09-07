@@ -2612,7 +2612,10 @@
     // Convite ao aprofundamento (plano concluído) tem prioridade sobre o modal de
     // "meta do dia" para não abrirem dois modais no mesmo render.
     if (!talvezConvidarAprofundamento()) talvezComemorarDia();
-    setTimeout(talvezAvisarProvaPassada, 0);
+    setTimeout(function () {
+      if (talvezAvisarProvaPassada()) return; // um modal de cada vez
+      talvezAvisarNovasDisciplinas();
+    }, 0);
     raiz.querySelectorAll('.prova-editar').forEach(function (b) { b.addEventListener('click', abrirEditarProva); });
     const adiantar = raiz.querySelector('#hoje-adiantar');
     if (adiantar) adiantar.addEventListener('click', adiantarProximaMateria);
@@ -4090,11 +4093,13 @@
   }
 
   function talvezAvisarProvaPassada() {
-    if (!state.plano) return;
+    if (!state.plano) return false;
     const raizModal = document.getElementById('modal-raiz');
-    if (raizModal && raizModal.children.length) return; // outro modal aberto: tenta depois
+    if (raizModal && raizModal.children.length) return true; // outro modal aberto: tenta depois
     const info = provaPassadaPendente();
-    if (info) abrirDialogoProvaPassada(info);
+    if (!info) return false;
+    abrirDialogoProvaPassada(info);
+    return true;
   }
 
   function marcarProvaAvisada(prova) {
@@ -9058,15 +9063,187 @@
     } else if (resultado && resultado.aplicado === false) {
       linhaResultado = '<p class="dialogo-msg" style="margin-top:0.6rem">Ainda não há o que recalcular — o plano está na primeira semana. A partir da próxima segunda o ajuste passa a valer.</p>';
     }
+    // O que o recálculo fez de concreto nesta semana. Sem isso o aluno vê o plano
+    // mexer sozinho e não sabe se foi porque se adiantou, atrasou ou nada mudou.
+    const r = opcoes.recalc;
+    let linhaMudanca = '';
+    if (r && r.estendido) {
+      linhaMudanca = '<p class="dialogo-msg" style="margin-top:0.6rem">No ritmo em que você está estudando, a teoria não cabia no prazo anterior — o <strong>término foi ajustado para ~' +
+        esc(String(r.meses).replace('.', ',')) + ' meses</strong>. Para voltar ao prazo antigo, é só aumentar as horas por semana.</p>';
+    } else if (r) {
+      const burn = D.burndownEdital(state, D.hojeISO());
+      if (burn && burn.situacao === 'adiantado') {
+        linhaMudanca = '<p class="dialogo-msg" style="margin-top:0.6rem">Você está <strong>adiantado</strong>: o que já venceu saiu da fila de teoria e o que falta foi redistribuído nas semanas restantes — então as próximas matérias tendem a entrar antes do previsto.</p>';
+      } else {
+        linhaMudanca = '<p class="dialogo-msg" style="margin-top:0.6rem">O prazo continua o mesmo — só a distribuição das semanas seguintes mudou.</p>';
+      }
+    }
     const m = abrirModal(
       '<div class="dialogo-icone" aria-hidden="true">↻</div>' +
       '<h3>Recálculo do plano</h3>' +
       '<p class="sub dialogo-msg">' + esc(EXPLICACAO_RECALCULO) + '</p>' +
       linhaResultado +
+      linhaMudanca +
       '<div class="modal-acoes"><button type="button" id="recalc-ok">Entendi</button></div>'
     );
     m.classList.add('modal-dialogo');
     m.querySelector('#recalc-ok').addEventListener('click', fecharModal);
+  }
+
+  // ---------- Comunicação do plano: largada, estreias e ajustes ----------
+  // O aluno nunca deve ver o calendário mudar sem saber por quê. Três momentos:
+  // a LARGADA (por que o plano abre com poucas matérias), a ESTREIA (quando uma
+  // matéria nova entra sozinha) e o RECÁLCULO (acima).
+
+  // Semana e data em que cada disciplina APARECE pela primeira vez no cronograma.
+  // Lê o cronograma gerado em vez do `inicio` teórico de cada disciplina: o limite
+  // de frentes por semana pode adiar a estreia real, e é a real que o aluno vê.
+  function estreiasDisciplinas(cron) {
+    const vistas = {};
+    const lista = [];
+    (cron || []).forEach(function (sem) {
+      (sem.blocos || []).forEach(function (b) {
+        if (!b.disciplina || vistas[b.disciplina]) return;
+        vistas[b.disciplina] = true;
+        lista.push({ disciplinaId: b.disciplina, semana: sem.semana, inicio: sem.inicio });
+      });
+    });
+    return lista;
+  }
+
+  // Modal informativo longo: abrirModal foca o primeiro elemento focável, que aqui é
+  // o botão no rodapé — no celular isso abre a caixa já rolada até o fim, escondendo
+  // o título. Foca o próprio modal e volta ao topo, para o aluno ler do começo.
+  function focarTopoModal(m) {
+    setTimeout(function () { m.focus(); m.scrollTop = 0; }, 0);
+  }
+
+  function chipDisciplinaHtml(id) {
+    const d = D.disciplinaPorId(state, id);
+    if (!d) return '';
+    return '<span class="chip-disc chip-disc-estatico" style="background:' + esc(d.cor || '#9A9DA3') +
+      '" title="' + esc(d.nome) + '">' + esc(d.id) + '</span>';
+  }
+
+  function nomeDisciplina(id) {
+    const d = D.disciplinaPorId(state, id);
+    return d ? d.nome : id;
+  }
+
+  // Lista "quem entra quando", agrupada por semana e limitada — a fila inteira de um
+  // edital grande viraria uma parede de texto que ninguém lê.
+  function filaEstreiasHtml(estreias, limite) {
+    const porSemana = [];
+    estreias.forEach(function (e) {
+      const atual = porSemana[porSemana.length - 1];
+      if (atual && atual.semana === e.semana) atual.ids.push(e.disciplinaId);
+      else porSemana.push({ semana: e.semana, inicio: e.inicio, ids: [e.disciplinaId] });
+    });
+    const mostrar = porSemana.slice(0, limite);
+    const ocultos = porSemana.slice(limite).reduce(function (n, g) { return n + g.ids.length; }, 0);
+    return '<ul class="largada-fila">' + mostrar.map(function (g) {
+      return '<li><span class="largada-fila-quando">' + esc(D.formatarDataBR(g.inicio)) + '</span>' +
+        '<span class="largada-fila-quem">' + g.ids.map(function (id) { return esc(nomeDisciplina(id)); }).join(', ') + '</span></li>';
+    }).join('') + '</ul>' +
+      (ocultos > 0 ? '<p class="sub largada-resto">e mais ' + ocultos + ' matéria' + (ocultos > 1 ? 's' : '') + ' depois dessas.</p>' : '');
+  }
+
+  // Caixa central logo após gerar o plano: quais matérias começam agora, por que só
+  // elas, e quando as próximas entram sozinhas.
+  function abrirExplicacaoLargada() {
+    if (!state.plano || (state.plano.modoPlanejamento || 'cronograma') === 'ciclo') return false;
+    const cron = D.cronogramaAtivo(state);
+    if (!cron.length) return false;
+    const estreias = estreiasDisciplinas(cron);
+    if (!estreias.length) return false;
+    const semanaAbertura = estreias[0].semana;
+    const agora = estreias.filter(function (e) { return e.semana === semanaAbertura; });
+    const depois = estreias.filter(function (e) { return e.semana !== semanaAbertura; });
+    // Edital pequeno, em que todas as matérias já abrem juntas: não há escalonamento
+    // para explicar e o aluno não tem o que se perguntar. Só marca como apresentadas.
+    if (!depois.length) {
+      state.plano.disciplinasApresentadas = agora.map(function (e) { return e.disciplinaId; });
+      salvar({ sincronizar: false });
+      return false;
+    }
+    const total = agora.length + depois.length;
+
+    // As matérias da largada já foram apresentadas: não avisar de novo como estreia.
+    state.plano.disciplinasApresentadas = agora.map(function (e) { return e.disciplinaId; });
+    salvar({ sincronizar: false });
+
+    const grupos = {};
+    agora.forEach(function (e) {
+      const d = D.disciplinaPorId(state, e.disciplinaId);
+      if (d) grupos[grupoCognitivoDisciplina(d)] = true;
+    });
+    const variada = Object.keys(grupos).length > 1;
+
+    const m = abrirModal(
+      '<div class="dialogo-icone" aria-hidden="true">🚦</div>' +
+      '<h3>Seu plano começa com ' + agora.length + ' matéria' + (agora.length > 1 ? 's' : '') + '</h3>' +
+      '<p class="sub dialogo-msg">Não é o edital inteiro de uma vez, e isso é de propósito: abrir as ' +
+      total + ' matérias no mesmo dia é o jeito mais rápido de abandonar o plano.</p>' +
+      '<div class="largada-chips">' + agora.map(function (e) { return chipDisciplinaHtml(e.disciplinaId); }).join('') + '</div>' +
+      '<div class="largada-por">' +
+      '<p><strong>Por que essas:</strong> o sistema ordena as matérias pelo peso delas na sua prova, pela incidência dos tópicos na banca e pela prioridade marcada no edital.' +
+      (variada ? ' A largada mistura áreas de propósito — assim você não passa meses seguidos só numa família de matéria.' : '') + '</p>' +
+      '<p><strong>As outras entram sozinhas</strong>, sem você fazer nada:</p>' + filaEstreiasHtml(depois, 4) +
+      '<p class="sub">Toda segunda o plano se recalcula com o que você estudou de verdade — e avisamos sempre que isso mudar alguma coisa.</p>' +
+      '</div>' +
+      '<div class="modal-acoes"><button type="button" id="largada-ok">Entendi, bora começar</button></div>'
+    );
+    m.classList.add('modal-dialogo', 'modal-largada');
+    m.querySelector('#largada-ok').addEventListener('click', fecharModal);
+    focarTopoModal(m);
+    return true;
+  }
+
+  // Estreia: a semana corrente trouxe uma matéria que ainda não tinha aparecido.
+  // Uma vez por matéria, por plano.
+  function talvezAvisarNovasDisciplinas() {
+    if (!state.plano || (state.plano.modoPlanejamento || 'cronograma') === 'ciclo') return false;
+    const raizModal = document.getElementById('modal-raiz');
+    if (raizModal && raizModal.children.length) return false; // não empilha modais
+    const cron = D.cronogramaAtivo(state);
+    if (!cron.length) return false;
+    const inicioSemana = D.segundaDaSemana(D.hojeISO());
+    const estreias = estreiasDisciplinas(cron);
+    // Plano criado antes deste aviso: registra o que já está em curso como conhecido,
+    // para não disparar um alerta retroativo de matéria que o aluno já vem estudando.
+    if (!Array.isArray(state.plano.disciplinasApresentadas)) {
+      state.plano.disciplinasApresentadas = estreias
+        .filter(function (e) { return e.inicio <= inicioSemana; })
+        .map(function (e) { return e.disciplinaId; });
+      salvar({ sincronizar: false });
+      return false;
+    }
+    const jaVistas = state.plano.disciplinasApresentadas;
+    const novas = estreias.filter(function (e) {
+      return e.inicio === inicioSemana && jaVistas.indexOf(e.disciplinaId) < 0;
+    });
+    if (!novas.length) return false;
+    state.plano.disciplinasApresentadas = jaVistas.concat(novas.map(function (e) { return e.disciplinaId; }));
+    salvar({ sincronizar: false });
+
+    const ritmo = state.plano.ritmos && state.plano.ritmoAtivo ? state.plano.ritmos[state.plano.ritmoAtivo] : null;
+    const proximas = estreias.filter(function (e) { return e.inicio > inicioSemana; });
+    const m = abrirModal(
+      '<div class="dialogo-icone" aria-hidden="true">✨</div>' +
+      '<h3>' + (novas.length > 1 ? 'Novas matérias no seu plano' : 'Nova matéria no seu plano') + '</h3>' +
+      '<div class="largada-chips">' + novas.map(function (e) { return chipDisciplinaHtml(e.disciplinaId); }).join('') + '</div>' +
+      '<p class="dialogo-msg">Esta semana entra <strong>' +
+      novas.map(function (e) { return esc(nomeDisciplina(e.disciplinaId)); }).join('</strong>, <strong>') +
+      '</strong> no seu calendário.</p>' +
+      '<p class="sub dialogo-msg">Estava reservada para agora desde que o plano foi montado: ele abre com poucas frentes e vai abrindo as outras conforme você avança' +
+      (ritmo && ritmo.semanas ? ' — você está na semana ' + esc(String(novas[0].semana)) + ' de ' + esc(String(ritmo.semanas)) : '') + '.</p>' +
+      (proximas.length ? '<div class="largada-por"><p class="sub"><strong>Depois desta vêm:</strong></p>' + filaEstreiasHtml(proximas, 3) + '</div>' : '') +
+      '<div class="modal-acoes"><button type="button" id="estreia-ok">Certo</button></div>'
+    );
+    m.classList.add('modal-dialogo', 'modal-largada');
+    m.querySelector('#estreia-ok').addEventListener('click', fecharModal);
+    focarTopoModal(m);
+    return true;
   }
 
   // A semana de estudos FECHA no domingo às 21h: a partir daí o check-in e o
@@ -9411,13 +9588,56 @@
     return true;
   }
 
+  // `\bdir\b` pega a abrevia\u00e7\u00e3o usada em quase todo edital ("No\u00e7\u00f5es Dir. Processual
+  // Penal"), que sem isso ca\u00eda em 'geral' e fazia a mat\u00e9ria passar por "de outra
+  // \u00e1rea" na regra de variedade da largada.
   function grupoCognitivoDisciplina(d) {
     const nome = (d.nome + ' ' + d.id).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (/portugues|lingua|redacao|texto|gramatica/.test(nome)) return 'linguagem';
     if (/raciocinio|logico|matematica|estatistica|financeira|exatas/.test(nome)) return 'logica';
-    if (/direito|constitucional|administrativo|civil|penal|tributario|previdenciario|processual/.test(nome)) return 'direito';
+    if (/direito|\bdir\b|legislacao|constitucional|administrativo|civil|penal|tributario|previdenciario|processual/.test(nome)) return 'direito';
     if (/informatica|tecnologia|dados|sistemas/.test(nome)) return 'tecnologia';
     return 'geral';
+  }
+
+  const ROTULO_GRUPO = {
+    linguagem: 'linguagem', logica: 'l\u00f3gica e exatas', direito: 'Direito',
+    tecnologia: 'tecnologia', geral: 'conhecimentos gerais'
+  };
+
+  // N\u00ba de disciplinas que abrem o plano na semana 1; o resto entra em rampa.
+  const LARGADA_SEMANA1 = 3;
+
+  // Devolve a disciplina que merece uma vaga EXTRA na largada, para o plano n\u00e3o abrir
+  // com uma fam\u00edlia de mat\u00e9ria s\u00f3. Sem isso um edital de carreira jur\u00eddica come\u00e7a com
+  // 3 Direitos e empurra Portugu\u00eas para o meio do plano \u2014 o aluno passa meses com a
+  // sensa\u00e7\u00e3o de "s\u00f3 estudo Direito" e as transversais, que maturam devagar, ficam
+  // para o fim. Devolve null quando n\u00e3o h\u00e1 nada a corrigir ou promover.
+  function promoverVariedadeLargada(ordemInicio, docsPorScore) {
+    if (ordemInicio.length <= LARGADA_SEMANA1) return null;
+    const largada = ordemInicio.slice(0, LARGADA_SEMANA1);
+    function fora(d) { return largada.indexOf(d) < 0; }
+    // 1) L\u00edngua/interpreta\u00e7\u00e3o \u00e9 a mat\u00e9ria mais universal dos concursos e a que mais
+    //    depende de tempo para maturar. Se o edital tem uma e ela ficou de fora da
+    //    largada, \u00e9 ela que entra \u2014 n\u00e3o adianta a largada ser "variada" por uma
+    //    mat\u00e9ria de decoreba se o aluno s\u00f3 vai ver Portugu\u00eas no terceiro m\u00eas.
+    if (!largada.some(function (d) { return d.grupo === 'linguagem'; })) {
+      // Entre as de linguagem entra a matéria-BASE, não a complementar: o score puro
+      // escolheria "Redação Oficial" (2 tópicos) na frente de "Língua Portuguesa" (9),
+      // porque a prioridade entra no score como MÉDIA e favorece disciplina pequena.
+      const linguas = docsPorScore.filter(function (d) { return fora(d) && d.grupo === 'linguagem'; });
+      if (linguas.length) {
+        return linguas.slice().sort(function (a, b) {
+          return (b.disciplina.peso || 1) - (a.disciplina.peso || 1) ||
+            b.topicos.length - a.topicos.length || b.score - a.score;
+        })[0];
+      }
+    }
+    // 2) Edital sem mat\u00e9ria de linguagem: basta quebrar a monotonia quando a largada
+    //    inteira \u00e9 de uma fam\u00edlia s\u00f3.
+    const grupo = largada[0].grupo;
+    if (largada.some(function (d) { return d.grupo !== grupo; })) return null;
+    return docsPorScore.find(function (d) { return fora(d) && d.grupo !== grupo; }) || null;
   }
 
   // Recebe os docs já ordenados por importância (score) e devolve a ORDEM DE INÍCIO
@@ -9693,9 +9913,17 @@
     // as matérias difíceis ocupariam sozinhas as primeiras semanas e o aluno
     // começaria o plano só apanhando. Assim a largada já mistura difícil com
     // fácil/normal — vitórias rápidas no começo, sem perder o foco no que é pesado.
-    espalharPorDificuldade(docs).forEach(function (d, idx) {
-      d.inicio = idx < 3 ? 1 : Math.min(semanas, 2 + Math.floor((idx - 2) * semanas / Math.max(1, docs.length)));
+    const ordemInicio = espalharPorDificuldade(docs);
+    // ... e a largada ainda reserva uma vaga EXTRA para uma matéria de outro grupo
+    // cognitivo quando as 3 primeiras são todas da mesma família (ver
+    // promoverVariedadeLargada). Ninguém é rebaixado: o limite de frentes por semana
+    // continua valendo e alternarGrupos faz o rodízio entre as ativas.
+    const promovida = promoverVariedadeLargada(ordemInicio, docs);
+    ordemInicio.forEach(function (d, idx) {
+      d.inicio = (idx < LARGADA_SEMANA1 || d === promovida) ? 1
+        : Math.min(semanas, 2 + Math.floor((idx - 2) * semanas / Math.max(1, docs.length)));
     });
+    relatorio.promovidaLargada = promovida ? promovida.disciplina.id : null;
     // Vazão de teoria por semana proporcional às HORAS, não só ao nº de disciplinas.
     // Sem isso, a vazão ficava travada em ~limite tópicos/semana (3–6) mesmo com
     // muitas horas: planos longos demais ou edital descoberto. Esforço por tópico ≈
@@ -9852,6 +10080,10 @@
     // deslocar as semanas passadas.
     if (!preservar) entrada.plano.gerado_em = inicioAtual;
     entrada.plano.ultimaRecalcSemana = inicioAtual;
+    // O cronograma novo pode mudar a semana de estreia de cada matéria: a lista de
+    // "já apresentadas" é reconstruída a partir dele (em abrirExplicacaoLargada, ou
+    // no próximo render para as gerações silenciosas) em vez de ficar desatualizada.
+    delete entrada.plano.disciplinasApresentadas;
     window.Store.hidratar(state);
     // Revisões são a fonte única de "manutenção": tópicos já concluídos/dominados
     // (inclusive vindos do ponto de partida) ganham a curva de repetição espaçada
@@ -9993,15 +10225,19 @@
       entrada.plano.ultimaRecalcSemana = inicioAtual;
       return;
     }
-    // No 1º recálculo automático, explica em um modal central (depois é só toast).
-    if (!state.config.explicacaoRecalculoVista) {
+    // Explica em modal central no 1º recálculo e sempre que a mudança for MATERIAL
+    // (prazo de término ajustado): o aluno não pode ver a data da prova se mexer
+    // sozinha e descobrir por um toast que sumiu em 4 segundos. Recálculo de rotina,
+    // que só reorganiza as semanas, continua no toast para não interromper.
+    const primeiraVez = !state.config.explicacaoRecalculoVista;
+    if (primeiraVez) {
       state.config.explicacaoRecalculoVista = true;
       salvar({ sincronizar: false });
-      abrirExplicacaoRecalculo({ resultado: 'auto' });
+    }
+    if (primeiraVez || r.estendido) {
+      abrirExplicacaoRecalculo({ resultado: 'auto', recalc: r });
     } else {
-      toast(r.estendido
-        ? 'Plano recalculado: no seu ritmo o término foi ajustado para ~' + String(r.meses).replace('.', ',') + ' meses.'
-        : 'Plano da semana recalculado com base no seu progresso.', r.estendido ? 'erro' : 'sucesso');
+      toast('Plano da semana recalculado com base no seu progresso.', 'sucesso');
     }
   }
 
@@ -10038,8 +10274,10 @@
       agendaModo = 'semana';
       render();
       if (modoPlano === 'ciclo') toast('Ciclo de estudos gerado com topicos sugeridos', 'sucesso');
-      else
-      toast('Plano gerado — o calendário foi preenchido com todas as semanas', 'sucesso');
+      else {
+        toast('Plano gerado — o calendário foi preenchido com todas as semanas', 'sucesso');
+        abrirExplicacaoLargada();
+      }
     });
   }
 
@@ -10521,6 +10759,9 @@
         ? ' · ' + resumoTroca.sessoes + ' sessões e ' + resumoTroca.questoes + ' questões reaproveitadas'
         : '';
       toast('Plano ' + nomeRitmo + (ehAtualizacao ? ' atualizado — histórico preservado' : ' gerado — calendário preenchido') + complementoTroca, 'sucesso');
+      // Explica a largada logo depois de montar o plano — é aqui que o aluno olha o
+      // calendário pela primeira vez e se pergunta por que faltam matérias.
+      if (modoPlano !== 'ciclo') abrirExplicacaoLargada();
     });
 
     mostrarPasso(1);
@@ -11040,7 +11281,10 @@
 
   function ligarPlanejamento(raiz) {
     setTimeout(talvezAlertarCobertura, 0);
-    setTimeout(talvezAvisarProvaPassada, 0);
+    setTimeout(function () {
+      if (talvezAvisarProvaPassada()) return; // um modal de cada vez
+      talvezAvisarNovasDisciplinas();
+    }, 0);
     const btnEnf = raiz.querySelector('#enf-ajustar');
     if (btnEnf) btnEnf.addEventListener('click', abrirAjusteEnfase);
     // alternar método (cronograma ↔ ciclo)

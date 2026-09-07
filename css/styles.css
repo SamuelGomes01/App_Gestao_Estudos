@@ -3123,6 +3123,31 @@ html[data-tema="escuro"] .mes-evento .mes-evento-hora { color: var(--tinta); }
 }
 .modal-dialogo .modal-acoes { justify-content: center; margin-top: 1.3rem; }
 .modal-dialogo input[type="text"] { text-align: center; margin-top: 0.4rem; }
+
+/* Comunicação do plano: largada (por que começa com N matérias) e estreias */
+.modal-largada { max-width: 480px; }
+.largada-chips {
+  display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center;
+  margin: 0.9rem 0 0.2rem;
+}
+.chip-disc-estatico { cursor: default; }
+.largada-por { text-align: left; margin-top: 1rem; }
+.largada-por p { margin: 0 0 0.6rem; font-size: 0.88rem; line-height: 1.5; }
+.largada-por p:last-child { margin-bottom: 0; }
+.largada-fila {
+  list-style: none; margin: 0 0 0.7rem; padding: 0;
+  border: 1px solid var(--linha); border-radius: 10px;
+}
+.largada-fila li {
+  display: flex; align-items: baseline; gap: 0.7rem; padding: 0.45rem 0.7rem;
+}
+.largada-fila li + li { border-top: 1px solid var(--linha); }
+.largada-fila-quando {
+  font-family: var(--fonte-mono); font-size: 0.76rem; color: var(--grafite);
+  white-space: nowrap; flex-shrink: 0;
+}
+.largada-fila-quem { font-size: 0.86rem; color: var(--tinta); }
+.largada-resto { margin: -0.3rem 0 0.6rem; font-size: 0.8rem; }
 @keyframes dialogo-entra {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: none; }
