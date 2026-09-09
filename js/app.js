@@ -7952,44 +7952,66 @@
       salvar(); fecharModal(); render();
       toast('Bloco removido');
     });
+    // O que está NO FORMULÁRIO agora — salvo ou não. "Cronometrar" e "Registrar
+    // sessão" também são saídas do modal, então precisam enxergar a edição aberta.
+    function lerCampos() {
+      const top = selTop.value;
+      return {
+        data: m.querySelector('#agde-data').value || a.data,
+        duracaoMin: Math.max(5, parseInt(m.querySelector('#agde-dur').value, 10) || 60),
+        obs: m.querySelector('#agde-obs').value.trim(),
+        disciplinaId: selDisc.value,
+        topicoId: top && top !== OPT_NOVO_TOPICO ? top : null
+      };
+    }
+    function aplicarCampos(v) {
+      a.data = v.data; a.duracaoMin = v.duracaoMin; a.obs = v.obs;
+      a.disciplinaId = v.disciplinaId; a.topicoId = v.topicoId;
+    }
+    const discOriginal = a.disciplinaId;
+    // Grava a edição pendente antes de sair para o timer/registro. Sem isso o aluno
+    // trocava o tópico recomendado pelo motor, clicava em "Cronometrar" e a tela do
+    // timer abria com o tópico antigo — tinha que escolher de novo lá. Uma troca de
+    // disciplina feita por aqui vale só para este bloco: o alcance recorrente segue
+    // sendo perguntado apenas no "Salvar", para não interromper quem vai estudar.
+    function gravarEdicaoPendente() {
+      aplicarCampos(lerCampos());
+      salvar();
+    }
     const btnReg = m.querySelector('#agde-registrar');
-    if (btnReg) btnReg.addEventListener('click', function () { fecharModal(); registrarDeAgenda(a); });
+    if (btnReg) btnReg.addEventListener('click', function () {
+      gravarEdicaoPendente();
+      fecharModal();
+      registrarDeAgenda(a);
+    });
     const btnTimer = m.querySelector('#agde-timer');
     if (btnTimer) btnTimer.addEventListener('click', function () {
+      gravarEdicaoPendente();
       const topId = a.topicoId || (D.disciplinaPorId(state, a.disciplinaId) || { topicos: [] }).topicos.map(function (t) { return t.id; })[0];
       if (!topId) { toast('Crie um tópico para esta disciplina antes de usar o timer.', 'erro'); return; }
       fecharModal();
       iniciarTimerDoBloco(a, topId);
       render();
     });
-    const discOriginal = a.disciplinaId;
     m.querySelector('#form-agd-ed').addEventListener('submit', function (e) {
       e.preventDefault();
-      const novaData = m.querySelector('#agde-data').value;
-      const novaDur = Math.max(5, parseInt(m.querySelector('#agde-dur').value, 10) || 60);
-      const novaObs = m.querySelector('#agde-obs').value.trim();
-      const novaDisc = selDisc.value;
-      const novoTop = selTop.value || null;
-      function aplicarCampos() {
-        a.data = novaData; a.duracaoMin = novaDur; a.obs = novaObs;
-        a.disciplinaId = novaDisc; a.topicoId = novoTop;
-      }
+      const vals = lerCampos();
       // Trocou a disciplina de um bloco RECORRENTE (gerado pelo motor): pergunta se
       // vale só para esta semana ou para as próximas (regra que sobrevive à
       // regeneração). Mover/duração/anotação continuam sendo só deste bloco.
-      if (novaDisc !== discOriginal && a.gerado && !a.feito) {
+      if (vals.disciplinaId !== discOriginal && a.gerado && !a.feito) {
         abrirAlcanceRecorrente({ diaNome: nomeDiaSemana(a.data) }, function (alc) {
           if (alc === 'semana') {
-            aplicarCampos();
+            aplicarCampos(vals);
             salvar(); fecharModal(); render();
             toast('Bloco atualizado só nesta semana', 'sucesso');
           } else {
-            criarRegraTrocaRecorrente(a, discOriginal, novaDisc, alc);
+            criarRegraTrocaRecorrente(a, discOriginal, vals.disciplinaId, alc);
           }
         });
         return;
       }
-      aplicarCampos();
+      aplicarCampos(vals);
       salvar(); fecharModal(); render();
       toast('Bloco atualizado', 'sucesso');
     });
